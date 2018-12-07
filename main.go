@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/gin-gonic/gin"
-	"github.com/globalsign/mgo"
 	"github.com/globalsign/mgo/bson"
 	"log"
 	"net/http"
@@ -22,12 +21,13 @@ const (
 	STATUS_PROGRESS     = "progress"
 	STATUS_CANCEL       = "cancel"
 	STATUS_COMPLETE     = "complete"
+	MODEL_TASK          = "task"
+	MODEL_BOOKMARK      = "bookmark"
 )
 
 var (
-	configFile   string
-	config       serverConfig
-	g_mgoSession *mgo.Session
+	configFile string
+	config     serverConfig
 )
 
 type serverConfig struct {
@@ -40,8 +40,10 @@ type TodoTask struct {
 	Id           bson.ObjectId `json:"id" bson:"_id"`
 	Title        string        `json:"title" bson:"title"`     // binding:"required"
 	Content      string        `json:"content" bson:"content"` //binding:"required"
+	Link         string        `json:"link" bson:"link"`       //binding:"required"
 	Status       string        `json:"status" bson:"status"`
 	UserId       string        `json:"user_id" bson:"user_id"`
+	ModelType    string        `json:"-" bson:"model_type"`
 	CreatedTime  time.Time     `json:"created_time" bson:"created_time"`
 	ModifiedTime time.Time     `json:"modified_time" bson:"modified_time"`
 }
@@ -49,23 +51,6 @@ type TodoTask struct {
 type TaskListResponse struct {
 	List  []TodoTask `json:"list"`
 	Count int        `json:"count"`
-}
-
-func connectMongo(mongoUrl string) *mgo.Session {
-	session, err := mgo.Dial(mongoUrl)
-	if err != nil {
-		log.Fatal("connection mongodb failed!")
-		panic(err)
-	}
-	return session
-}
-
-func closeMongo(s *mgo.Session) {
-	s.Close()
-}
-
-func getTaskCollection() *mgo.Collection {
-	return g_mgoSession.DB(MONGO_DB_TASK).C(MONGO_COLL_TASKS)
 }
 
 func addNewTask(c *gin.Context) {
@@ -79,16 +64,16 @@ func addNewTask(c *gin.Context) {
 	userId := c.MustGet(gin.AuthUserKey).(string)
 
 	t := time.Now()
+	jTask.Id = bson.NewObjectId()
 	jTask.CreatedTime = t
 	jTask.ModifiedTime = t
 	jTask.Status = STATUS_NEW
-	jTask.Id = bson.NewObjectId()
+	jTask.ModelType = MODEL_TASK
 	jTask.UserId = userId
 
 	//newTask := TodoTask{"test-task", "content", "new", time.Now(), time.Now()}
 
-	mgoCollection_Task := getTaskCollection()
-	err := mgoCollection_Task.Insert(&jTask)
+	err := storage_insertOne(&jTask)
 	if err != nil {
 		log.Fatal(err)
 	} else {
@@ -100,37 +85,29 @@ func addNewTask(c *gin.Context) {
 }
 
 func queryTaskList(c *gin.Context) {
-	mgoCollection_Task := getTaskCollection()
 
-	count, err := mgoCollection_Task.Count()
-	if err != nil {
-		log.Println("query task count failed")
-		count = 0
-	}
-
-	var taskListResponse TaskListResponse
-	var taskList []TodoTask
-	taskListResponse.Count = count
 	//task := TodoTask{}
 	//iter := mgoCollection_Task.Find(nil).Iter()
 	//for iter.Next(&task) {
 	//	taskListResponse.List = append(taskListResponse.List, task)
 	//}
-	mgoCollection_Task.Find(nil).All(&taskList)
-	taskListResponse.List = taskList
+
+	var taskListResponse TaskListResponse
+	storage_selectAll(&taskListResponse)
+
 	c.JSON(http.StatusOK, taskListResponse)
 }
 
 func queryTask(c *gin.Context) {
-	var task TodoTask
 	id := c.Params.ByName("id")
-	objectId := bson.ObjectIdHex(id)
+	//objectId := bson.ObjectIdHex(id)
 
 	userId := c.MustGet(gin.AuthUserKey).(string)
 
-	mgoCollection_Task := getTaskCollection()
+	// mgoCollection_Task := getTaskCollection()
 	//err := mgoCollection_Task.Find(bson.M{"_id": objectId}).One(&task)
-	err := mgoCollection_Task.FindId(objectId).One(&task)
+	//err := mgoCollection_Task.FindId(objectId).One(&task)
+	task, err := storage_selectOne(id)
 
 	if err != nil {
 		fmt.Println(err)
@@ -147,24 +124,24 @@ func queryTask(c *gin.Context) {
 
 func updateTask(c *gin.Context) {
 	id := c.Params.ByName("id")
-	objectId := bson.ObjectIdHex(id)
 
 	userId := c.MustGet(gin.AuthUserKey).(string)
 
-	var jTask, existingTask TodoTask
+	var jTask TodoTask
+	var existingTask *TodoTask
+	var err error
 
 	if err := c.ShouldBindJSON(&jTask); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	mgoCollection_Task := getTaskCollection()
-
-	if err := mgoCollection_Task.FindId(objectId).One(&existingTask); err != nil {
+	if existingTask, err = storage_selectOne(id); err != nil {
 		fmt.Println("updateTask  - query task error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
 	if existingTask.UserId != userId {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
@@ -182,7 +159,7 @@ func updateTask(c *gin.Context) {
 	}
 	updatBson["modified_time"] = time.Now()
 
-	mgoCollection_Task.Update(bson.M{"_id": objectId}, bson.M{"$set": updatBson})
+	storage_updateById(id, updatBson)
 
 	c.JSON(http.StatusOK, gin.H{"code": 1, "message": "success"})
 }
