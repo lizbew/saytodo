@@ -157,6 +157,9 @@ func updateTask(c *gin.Context) {
 	if len(jTask.Content) > 0 {
 		updatBson["content"] = jTask.Content
 	}
+	if len(jTask.Link) > 0 {
+		updatBson["link"] = jTask.Link
+	}
 	updatBson["modified_time"] = time.Now()
 
 	storage_updateById(id, updatBson)
