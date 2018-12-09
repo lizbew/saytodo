@@ -23,7 +23,7 @@ deps:
 
 .PHONY: build
 build:
-	$(GO) build  $(GOFILES)
+	$(GO) build -o saytodo $(GOFILES)
 
 run:
 	$(GO) run  $(GOFILES)
