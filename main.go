@@ -53,6 +53,12 @@ type TaskListResponse struct {
 	Count int        `json:"count"`
 }
 
+
+type Login struct {
+	User string  `form:"user" json:"user" binding:"required"`
+	Password string `form:"password" json:"password" binding:"required"`
+}
+
 func addNewTask(c *gin.Context) {
 	var jTask TodoTask
 
@@ -180,12 +186,20 @@ func parseAccounts(accountInfo string) gin.Accounts {
 	return accounts
 }
 
+func auth(c *gin.Context) {
+	var login Login
+	c.Bind(&login)
+	c.JSON(http.StatusOK, gin.H{"code": 1, "message": "success"})
+}
+
 func setRouter() *gin.Engine {
 	r := gin.Default()
 
 	r.GET("/ping", func(c *gin.Context) {
 		c.String(http.StatusOK, "pong")
 	})
+
+	r.POST('/auth', auth)
 
 	// saytodo
 	saytodo := r.Group("saytodo", gin.BasicAuth(parseAccounts(config.AccountInfo)))
@@ -198,6 +212,7 @@ func setRouter() *gin.Engine {
 
 	return r
 }
+
 
 // https://zhuanlan.zhihu.com/p/37844072
 // ToBson ...
